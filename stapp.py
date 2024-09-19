@@ -23,9 +23,16 @@ app_logger.addHandler(my_handler)
 logging.getLogger('urllib3').setLevel(logging.WARNING)
 
 # Set up the title and description
-st.title("ok")
+st.title("Shopify Multi-Store Bulk Fulfillment Tool")
 st.write("""
-ok
+This tool allows you to fulfill multiple Shopify orders across multiple stores at once by entering the order information below.
+
+Please input the orders in the following format (one per line):
+
+`OrderName    TrackingNumber    Carrier`
+
+**Example:**
+
 """)
 
 # Input text area for orders
@@ -80,7 +87,7 @@ if st.button("Fulfill Orders"):
                 if api_call_limit:
                     current_calls, max_calls = map(int, api_call_limit.split('/'))
                     app_logger.info(f"API Call Limit: {current_calls}/{max_calls}")
-                    # If we're close to the limit, sleep longer
+                    # Adjust sleep time dynamically
                     if current_calls / max_calls > 0.8:
                         sleep_time = min(MAX_SLEEP_TIME, MIN_SLEEP_TIME * (current_calls / max_calls) * 5)
                         app_logger.warning(f"Approaching API rate limit. Sleeping for {sleep_time:.2f} seconds.")
@@ -88,15 +95,13 @@ if st.button("Fulfill Orders"):
                     else:
                         time.sleep(MIN_SLEEP_TIME)
                 else:
-                    # If header is missing, default sleep
                     time.sleep(MIN_SLEEP_TIME)
 
                 if response.status_code == 429:
-                    # Too Many Requests, implement exponential backoff
                     retry_after = int(response.headers.get('Retry-After', 5))
                     app_logger.warning(f"Received 429 Too Many Requests. Retrying after {retry_after} seconds.")
                     time.sleep(retry_after)
-                    continue  # Retry the request
+                    continue
                 else:
                     return response
 
@@ -227,25 +232,28 @@ if st.button("Fulfill Orders"):
         except Exception as e:
             app_logger.error(f"An error occurred: {str(e)}")
 
-        # Indicate processing is complete
-        st.success("All orders have been processed.")
+        # Compute total successes and failures
+        total_successful = sum(store['success_count'] for store in stores.values())
+        total_failed = sum(store['failure_count'] for store in stores.values())
+
+        # Display overall processing summary
+        st.success(f"**Processing complete:** {total_successful} orders fulfilled successfully, {total_failed} orders failed to fulfill.")
 
         # Display summary per store
-        st.header("Summary")
+        st.header("Detailed Summary per Store")
         for prefix, store in stores.items():
-            st.subheader(f"Store with prefix '{prefix}'")
-            st.write(f"Store URL: {store['store_url']}")
-            st.write(f"Successful fulfillments: {store['success_count']}")
-            st.write(f"Failed fulfillments: {store['failure_count']}")
+            with st.expander(f"Store with prefix '{prefix}'", expanded=True):
+                st.write(f"**Store URL:** {store['store_url']}")
+                st.write(f"**Successful fulfillments:** {store['success_count']}")
+                st.write(f"**Failed fulfillments:** {store['failure_count']}")
 
-            if store['not_found_orders']:
-                st.write("Orders not found:")
-                for order_name in store['not_found_orders']:
-                    st.write(f"- {order_name}")
+                if store['not_found_orders']:
+                    st.write("**Orders not found:**")
+                    st.write(", ".join(store['not_found_orders']))
 
-            if store['failed_orders']:
-                st.write("Orders that failed to fulfill:")
-                for order_name in set(store['failed_orders']):
-                    st.write(f"- {order_name}")
+                if store['failed_orders']:
+                    st.write("**Orders that failed to fulfill:**")
+                    st.write(", ".join(set(store['failed_orders'])))
 
-            st.write("---")
+        # Optionally, clear the input text area after processing
+        # st.text_area("Enter your orders here:", height=200, value="", key="input_area")
