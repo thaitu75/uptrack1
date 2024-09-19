@@ -4,6 +4,18 @@ import time
 import logging
 import os
 from logging.handlers import RotatingFileHandler
+# Set up logging to stdout
+import sys
+
+log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+handler = logging.StreamHandler(stream=sys.stdout)
+handler.setFormatter(log_formatter)
+handler.setLevel(logging.INFO)
+
+app_logger = logging.getLogger('root')
+app_logger.setLevel(logging.INFO)
+app_logger.handlers = []  # Clear existing handlers
+app_logger.addHandler(handler)
 
 # Streamlit page configuration
 st.set_page_config(page_title="Shopify Multi-Store Bulk Fulfillment Tool", layout="wide")
