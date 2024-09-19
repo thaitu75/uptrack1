@@ -33,8 +33,6 @@ Please input the orders in the following format (one per line):
 
 Example:
 
-G12345 00340434518424504153 DHL C54321 00340434518424554349 DHL U67890 00340434518424567890 DHL
-
 """)
 
 # Input text area for orders
