@@ -26,12 +26,6 @@ logging.getLogger('urllib3').setLevel(logging.WARNING)
 # Set up the title and description
 st.title("Shopify Multi-Store Bulk Fulfillment Tool")
 st.write("""
-This tool allows you to fulfill multiple Shopify orders across multiple stores at once by entering the order information below.
-Please input the orders in the following format (one per line):
-
-`OrderName    TrackingNumber    Carrier`
-
-Example:
 
 """)
 
