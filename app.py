@@ -26,6 +26,14 @@ logging.getLogger('urllib3').setLevel(logging.WARNING)
 # Set up the title and description
 st.title("Shopify Multi-Store Bulk Fulfillment Tool")
 st.write("""
+This tool allows you to fulfill multiple Shopify orders across multiple stores at once by entering the order information below.
+Please input the orders in the following format (one per line):
+
+`OrderName    TrackingNumber    Carrier`
+
+Example:
+
+G12345 00340434518424504153 DHL C54321 00340434518424554349 DHL U67890 00340434518424567890 DHL
 
 """)
 
@@ -43,7 +51,7 @@ if st.button("Fulfill Orders"):
 
         # Load store configurations from secrets.toml
         stores = {}
-        # Load store configurations from environment variables
+      # Load store configurations from environment variables
 stores = {}
 store_number = 1
 while True:
@@ -67,7 +75,7 @@ while True:
     store_number += 1
 
         # Prepare store prefixes for case-insensitive comparison
-     store_prefixes = {prefix.upper(): store for prefix, store in stores.items()}
+        store_prefixes = {prefix.upper(): store for prefix, store in stores.items()}
 
         # Parse the input text
         input_lines = input_text.strip().split('\n')
