@@ -22,11 +22,6 @@ app_logger.addHandler(my_handler)
 # Suppress other loggers
 logging.getLogger('urllib3').setLevel(logging.WARNING)
 
-# Set up the title and description
-st.title("Shopify Multi-Store Bulk Fulfillment Tool")
-st.write("""ok
-
-""")
 
 # Input text area for orders
 input_text = st.text_area("Enter your orders here:", height=200)
