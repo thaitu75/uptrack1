@@ -66,7 +66,8 @@ while True:
         app_logger.error(f"Invalid format for {store_key}. Expected 'order_prefix,store_url,access_token'")
     store_number += 1
 
-     
+        # Prepare store prefixes for case-insensitive comparison
+     store_prefixes = {prefix.upper(): store for prefix, store in stores.items()}
 
         # Parse the input text
         input_lines = input_text.strip().split('\n')
