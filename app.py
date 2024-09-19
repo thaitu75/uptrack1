@@ -67,7 +67,7 @@ while True:
     store_number += 1
 
         # Prepare store prefixes for case-insensitive comparison
-        store_prefixes = {prefix.upper(): store for prefix, store in stores.items()}
+        # store_prefixes = {prefix.upper(): store for prefix, store in stores.items()}
 
         # Parse the input text
         input_lines = input_text.strip().split('\n')
