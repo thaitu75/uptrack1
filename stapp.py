@@ -23,13 +23,13 @@ app_logger.addHandler(my_handler)
 logging.getLogger('urllib3').setLevel(logging.WARNING)
 
 # Set up the title and description
-st.title(" ")
+st.title("Shopify Multi-Store Bulk Fulfillment Tool")
 st.write("""
-
+ok
 """)
 
 # Input text area for orders
-input_text = st.text_area(" ", height=200)
+input_text = st.text_area("Enter your orders here:", height=200)
 
 # Button to start processing
 if st.button("Fulfill Orders"):
@@ -45,7 +45,7 @@ if st.button("Fulfill Orders"):
         for key in st.secrets:
             if key.startswith("store_"):
                 store_config = st.secrets[key]
-                order_prefix = store_config['order_prefix']
+                order_prefix = store_config['order_prefix'].upper()
                 stores[order_prefix] = {
                     'store_url': store_config['store_url'],
                     'access_token': store_config['access_token'],
@@ -112,8 +112,8 @@ if st.button("Fulfill Orders"):
                     continue
                 order_name, tracking_number, carrier = parts
 
-                # Determine which store the order belongs to based on the prefix
-                order_prefix = order_name[0].upper()
+                # Determine which store the order belongs to based on the first two characters
+                order_prefix = order_name[:2].upper()
                 if order_prefix not in store_prefixes:
                     app_logger.error(f"Order {order_name} does not match any configured store prefixes.")
                     continue
@@ -248,5 +248,37 @@ if st.button("Fulfill Orders"):
                     st.write("**Orders that failed to fulfill:**")
                     st.write(", ".join(set(store['failed_orders'])))
 
-        # Optionally, clear the input text area after processing
-        # st.text_area("Enter your orders here:", height=200, value="", key="input_area")
+        # Function to send Telegram message
+        def send_telegram_message(message):
+            bot_token = st.secrets["telegram"]["bot_token"]
+            chat_id = st.secrets["telegram"]["chat_id"]
+            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            params = {
+                "chat_id": chat_id,
+                "text": message,
+                "parse_mode": "Markdown"
+            }
+            response = requests.get(url, params=params)
+            if response.status_code != 200:
+                app_logger.error(f"Failed to send Telegram message: {response.text}")
+
+        # Prepare the summary message
+        summary_message = f"*Shopify Fulfillment Summary*\n\n"
+        summary_message += f"Total orders processed: {total_orders}\n"
+        summary_message += f"Successful fulfillments: {total_successful}\n"
+        summary_message += f"Failed fulfillments: {total_failed}\n\n"
+
+        # Add per-store details
+        for prefix, store in stores.items():
+            summary_message += f"*Store with prefix '{prefix}':*\n"
+            summary_message += f"- Successful: {store['success_count']}\n"
+            summary_message += f"- Failed: {store['failure_count']}\n"
+            if store['not_found_orders']:
+                summary_message += f"- Orders not found: {', '.join(store['not_found_orders'])}\n"
+            failed_orders = set(store['failed_orders']) - set(store['not_found_orders'])
+            if failed_orders:
+                summary_message += f"- Orders failed to fulfill: {', '.join(failed_orders)}\n"
+            summary_message += "\n"
+
+        # Send the summary message to Telegram
+        send_telegram_message(summary_message)
