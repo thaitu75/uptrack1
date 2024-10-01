@@ -2,24 +2,21 @@ import streamlit as st
 import requests
 import time
 import logging
-from logging.handlers import RotatingFileHandler
 import os
-import json
+from logging.handlers import RotatingFileHandler
 
 # Streamlit page configuration
 st.set_page_config(page_title="Shopify Multi-Store Bulk Fulfillment Tool", layout="wide")
 
-# Set up logging with rotation
+# Set up logging to output to stdout
 log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-log_file = 'app.log'
-
-my_handler = RotatingFileHandler(log_file, mode='a', maxBytes=5*1024*1024, backupCount=2)
-my_handler.setFormatter(log_formatter)
-my_handler.setLevel(logging.INFO)
 
 app_logger = logging.getLogger('root')
 app_logger.setLevel(logging.INFO)
-app_logger.addHandler(my_handler)
+
+stream_handler = logging.StreamHandler()
+stream_handler.setFormatter(log_formatter)
+app_logger.addHandler(stream_handler)
 
 # Suppress other loggers
 logging.getLogger('urllib3').setLevel(logging.WARNING)
@@ -51,25 +48,25 @@ if st.button("Fulfill Orders"):
 
         # Load store configurations from environment variables
         stores = {}
-try:
-    store_configs_str = os.environ.get('STORE_CONFIGS', '{}')
-    store_configs_str = store_configs_str.replace("'", '"')  # Replace single quotes with double quotes
-    store_configs = json.loads(store_configs_str)
-    
-    for key, store_config in store_configs.items():
-        order_prefix = store_config['order_prefix'].upper()
-        stores[order_prefix] = {
-            'store_url': store_config['store_url'],
-            'access_token': store_config['access_token'],
-            'success_count': 0,
-            'failure_count': 0,
-            'not_found_orders': [],
-            'failed_orders': []
-        }
-except json.JSONDecodeError as e:
-    st.error(f"Error parsing STORE_CONFIGS environment variable: {e}")
-    st.error(f"STORE_CONFIGS value: {os.environ.get('STORE_CONFIGS', 'Not set')}")
-    stores = {}  # Set stores to an empty dict to avoid further errors
+        for key in os.environ:
+            if key.startswith("STORE_") and key.endswith("_ORDER_PREFIX"):
+                store_number = key.split("_")[1]
+                order_prefix = os.environ[key].upper()
+                store_url_key = f"STORE_{store_number}_STORE_URL"
+                access_token_key = f"STORE_{store_number}_ACCESS_TOKEN"
+                store_url = os.environ.get(store_url_key)
+                access_token = os.environ.get(access_token_key)
+                if store_url and access_token:
+                    stores[order_prefix] = {
+                        'store_url': store_url,
+                        'access_token': access_token,
+                        'success_count': 0,
+                        'failure_count': 0,
+                        'not_found_orders': [],
+                        'failed_orders': []
+                    }
+                else:
+                    app_logger.error(f"Missing store URL or access token for store {store_number}")
 
         # Prepare store prefixes for case-insensitive comparison
         store_prefixes = {prefix.upper(): store for prefix, store in stores.items()}
@@ -266,8 +263,11 @@ except json.JSONDecodeError as e:
 
         # Function to send Telegram message
         def send_telegram_message(message):
-            bot_token = os.environ.get('TELEGRAM_BOT_TOKEN')
-            chat_id = os.environ.get('TELEGRAM_CHAT_ID')
+            bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+            chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+            if not bot_token or not chat_id:
+                app_logger.error("Telegram bot token or chat ID not configured.")
+                return
             url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
             params = {
                 "chat_id": chat_id,
