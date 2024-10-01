@@ -2,20 +2,9 @@ import streamlit as st
 import requests
 import time
 import logging
-import os
 from logging.handlers import RotatingFileHandler
-# Set up logging to stdout
-import sys
-
-log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-handler = logging.StreamHandler(stream=sys.stdout)
-handler.setFormatter(log_formatter)
-handler.setLevel(logging.INFO)
-
-app_logger = logging.getLogger('root')
-app_logger.setLevel(logging.INFO)
-app_logger.handlers = []  # Clear existing handlers
-app_logger.addHandler(handler)
+import os
+import json
 
 # Streamlit page configuration
 st.set_page_config(page_title="Shopify Multi-Store Bulk Fulfillment Tool", layout="wide")
@@ -39,13 +28,12 @@ logging.getLogger('urllib3').setLevel(logging.WARNING)
 st.title("Shopify Multi-Store Bulk Fulfillment Tool")
 st.write("""
 This tool allows you to fulfill multiple Shopify orders across multiple stores at once by entering the order information below.
+
 Please input the orders in the following format (one per line):
 
 `OrderName    TrackingNumber    Carrier`
 
-Example:
-
-G12345 00340434518424504153 DHL C54321 00340434518424554349 DHL U67890 00340434518424567890 DHL
+**Example:**
 
 """)
 
@@ -61,30 +49,19 @@ if st.button("Fulfill Orders"):
         progress_bar = st.progress(0)
         status_text = st.empty()
 
-        # Load store configurations from secrets.toml
+        # Load store configurations from environment variables
         stores = {}
-      # Load store configurations from environment variables
-stores = {}
-store_number = 1
-while True:
-    store_key = f"STORE_{store_number}"
-    store_config_str = os.getenv(store_key)
-    if not store_config_str:
-        break  # No more stores
-    try:
-        # Expected format: order_prefix,store_url,access_token
-        order_prefix, store_url, access_token = store_config_str.split(',', 2)
-        stores[order_prefix.upper()] = {
-            'store_url': store_url,
-            'access_token': access_token,
-            'success_count': 0,
-            'failure_count': 0,
-            'not_found_orders': [],
-            'failed_orders': []
-        }
-    except ValueError:
-        app_logger.error(f"Invalid format for {store_key}. Expected 'order_prefix,store_url,access_token'")
-    store_number += 1
+        store_configs = json.loads(os.environ.get('STORE_CONFIGS', '{}'))
+        for key, store_config in store_configs.items():
+            order_prefix = store_config['order_prefix'].upper()
+            stores[order_prefix] = {
+                'store_url': store_config['store_url'],
+                'access_token': store_config['access_token'],
+                'success_count': 0,
+                'failure_count': 0,
+                'not_found_orders': [],
+                'failed_orders': []
+            }
 
         # Prepare store prefixes for case-insensitive comparison
         store_prefixes = {prefix.upper(): store for prefix, store in stores.items()}
@@ -111,7 +88,7 @@ while True:
                 if api_call_limit:
                     current_calls, max_calls = map(int, api_call_limit.split('/'))
                     app_logger.info(f"API Call Limit: {current_calls}/{max_calls}")
-                    # If we're close to the limit, sleep longer
+                    # Adjust sleep time dynamically
                     if current_calls / max_calls > 0.8:
                         sleep_time = min(MAX_SLEEP_TIME, MIN_SLEEP_TIME * (current_calls / max_calls) * 5)
                         app_logger.warning(f"Approaching API rate limit. Sleeping for {sleep_time:.2f} seconds.")
@@ -119,15 +96,13 @@ while True:
                     else:
                         time.sleep(MIN_SLEEP_TIME)
                 else:
-                    # If header is missing, default sleep
                     time.sleep(MIN_SLEEP_TIME)
 
                 if response.status_code == 429:
-                    # Too Many Requests, implement exponential backoff
                     retry_after = int(response.headers.get('Retry-After', 5))
                     app_logger.warning(f"Received 429 Too Many Requests. Retrying after {retry_after} seconds.")
                     time.sleep(retry_after)
-                    continue  # Retry the request
+                    continue
                 else:
                     return response
 
@@ -145,8 +120,8 @@ while True:
                     continue
                 order_name, tracking_number, carrier = parts
 
-                # Determine which store the order belongs to based on the prefix
-                order_prefix = order_name[0].upper()
+                # Determine which store the order belongs to based on the first two characters
+                order_prefix = order_name[:2].upper()
                 if order_prefix not in store_prefixes:
                     app_logger.error(f"Order {order_name} does not match any configured store prefixes.")
                     continue
@@ -258,25 +233,60 @@ while True:
         except Exception as e:
             app_logger.error(f"An error occurred: {str(e)}")
 
-        # Indicate processing is complete
-        st.success("All orders have been processed.")
+        # Compute total successes and failures
+        total_successful = sum(store['success_count'] for store in stores.values())
+        total_failed = sum(store['failure_count'] for store in stores.values())
+
+        # Display overall processing summary
+        st.success(f"**Processing complete:** {total_successful} orders fulfilled successfully, {total_failed} orders failed to fulfill.")
 
         # Display summary per store
-        st.header("Summary")
+        st.header("Detailed Summary per Store")
         for prefix, store in stores.items():
-            st.subheader(f"Store with prefix '{prefix}'")
-            st.write(f"Store URL: {store['store_url']}")
-            st.write(f"Successful fulfillments: {store['success_count']}")
-            st.write(f"Failed fulfillments: {store['failure_count']}")
+            with st.expander(f"Store with prefix '{prefix}'", expanded=True):
+                st.write(f"**Store URL:** {store['store_url']}")
+                st.write(f"**Successful fulfillments:** {store['success_count']}")
+                st.write(f"**Failed fulfillments:** {store['failure_count']}")
 
+                if store['not_found_orders']:
+                    st.write("**Orders not found:**")
+                    st.write(", ".join(store['not_found_orders']))
+
+                if store['failed_orders']:
+                    st.write("**Orders that failed to fulfill:**")
+                    st.write(", ".join(set(store['failed_orders'])))
+
+        # Function to send Telegram message
+        def send_telegram_message(message):
+            bot_token = os.environ.get('TELEGRAM_BOT_TOKEN')
+            chat_id = os.environ.get('TELEGRAM_CHAT_ID')
+            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            params = {
+                "chat_id": chat_id,
+                "text": message,
+                "parse_mode": "Markdown"
+            }
+            response = requests.get(url, params=params)
+            if response.status_code != 200:
+                app_logger.error(f"Failed to send Telegram message: {response.text}")
+
+        # Prepare the summary message
+        summary_message = f"*Shopify Fulfillment Summary*\n\n"
+        summary_message += f"Total orders processed: {total_orders}\n"
+        summary_message += f"Successful fulfillments: {total_successful}\n"
+        summary_message += f"Failed fulfillments: {total_failed}\n\n"
+
+        # Add per-store details
+        for prefix, store in stores.items():
+            summary_message += f"*Store with prefix '{prefix}':*\n"
+            summary_message += f"- Successful: {store['success_count']}\n"
+            summary_message += f"- Failed: {store['failure_count']}\n"
             if store['not_found_orders']:
-                st.write("Orders not found:")
-                for order_name in store['not_found_orders']:
-                    st.write(f"- {order_name}")
+                summary_message += f"- Orders not found: {', '.join(store['not_found_orders'])}\n"
+            failed_orders = set(store['failed_orders']) - set(store['not_found_orders'])
+            if failed_orders:
+                summary_message += f"- Orders failed to fulfill: {', '.join(failed_orders)}\n"
+            summary_message += "\n"
 
-            if store['failed_orders']:
-                st.write("Orders that failed to fulfill:")
-                for order_name in set(store['failed_orders']):
-                    st.write(f"- {order_name}")
-
-            st.write("---")
+        # Send the summary message to Telegram
+        send_telegram_message(summary_message)
