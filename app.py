@@ -51,17 +51,25 @@ if st.button("Fulfill Orders"):
 
         # Load store configurations from environment variables
         stores = {}
-        store_configs = json.loads(os.environ.get('STORE_CONFIGS', '{}'))
-        for key, store_config in store_configs.items():
-            order_prefix = store_config['order_prefix'].upper()
-            stores[order_prefix] = {
-                'store_url': store_config['store_url'],
-                'access_token': store_config['access_token'],
-                'success_count': 0,
-                'failure_count': 0,
-                'not_found_orders': [],
-                'failed_orders': []
-            }
+try:
+    store_configs_str = os.environ.get('STORE_CONFIGS', '{}')
+    store_configs_str = store_configs_str.replace("'", '"')  # Replace single quotes with double quotes
+    store_configs = json.loads(store_configs_str)
+    
+    for key, store_config in store_configs.items():
+        order_prefix = store_config['order_prefix'].upper()
+        stores[order_prefix] = {
+            'store_url': store_config['store_url'],
+            'access_token': store_config['access_token'],
+            'success_count': 0,
+            'failure_count': 0,
+            'not_found_orders': [],
+            'failed_orders': []
+        }
+except json.JSONDecodeError as e:
+    st.error(f"Error parsing STORE_CONFIGS environment variable: {e}")
+    st.error(f"STORE_CONFIGS value: {os.environ.get('STORE_CONFIGS', 'Not set')}")
+    stores = {}  # Set stores to an empty dict to avoid further errors
 
         # Prepare store prefixes for case-insensitive comparison
         store_prefixes = {prefix.upper(): store for prefix, store in stores.items()}
