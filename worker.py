@@ -36,7 +36,6 @@ def load_stores():
                     'access_token': access_token,
                     'success_count': 0,
                     'failure_count': 0,
-                    'not_found_orders': [],
                     'failed_orders': []
                 }
             else:
@@ -86,7 +85,8 @@ def process_orders():
                 continue
 
             total_orders = len(orders)
-            processed_orders = 0
+            total_successful = 0
+            total_failed = 0
 
             for order_row in orders:
                 order_id = order_row['id']
@@ -100,6 +100,7 @@ def process_orders():
                     app_logger.error(f"Order {order_name} does not match any configured store prefixes.")
                     cursor.execute("UPDATE orders SET status = %s WHERE id = %s;", ('failed', order_id))
                     conn.commit()
+                    total_failed += 1
                     continue
 
                 store = store_prefixes[order_prefix]
@@ -155,6 +156,9 @@ def process_orders():
                         app_logger.error(f"Error fetching order {order_name}: {response.text}")
                         cursor.execute("UPDATE orders SET status = %s WHERE id = %s;", ('failed', order_id))
                         conn.commit()
+                        store['failure_count'] += 1
+                        store['failed_orders'].append(order_name)
+                        total_failed += 1
                         continue
 
                     orders_response = response.json().get('orders', [])
@@ -162,6 +166,9 @@ def process_orders():
                         app_logger.error(f"Order {order_name} not found.")
                         cursor.execute("UPDATE orders SET status = %s WHERE id = %s;", ('failed', order_id))
                         conn.commit()
+                        store['failure_count'] += 1
+                        store['failed_orders'].append(order_name)
+                        total_failed += 1
                         continue
 
                     order_data = orders_response[0]  # Assuming order name is unique
@@ -176,6 +183,9 @@ def process_orders():
                         app_logger.error(f"Error fetching fulfillment orders for {order_name}: {response.text}")
                         cursor.execute("UPDATE orders SET status = %s WHERE id = %s;", ('failed', order_id))
                         conn.commit()
+                        store['failure_count'] += 1
+                        store['failed_orders'].append(order_name)
+                        total_failed += 1
                         continue
 
                     fulfillment_orders = response.json().get('fulfillment_orders', [])
@@ -183,6 +193,9 @@ def process_orders():
                         app_logger.error(f"No fulfillment orders found for order {order_name}.")
                         cursor.execute("UPDATE orders SET status = %s WHERE id = %s;", ('failed', order_id))
                         conn.commit()
+                        store['failure_count'] += 1
+                        store['failed_orders'].append(order_name)
+                        total_failed += 1
                         continue
 
                     # Initialize a flag to track if any fulfillment was successful
@@ -232,24 +245,41 @@ def process_orders():
                     if order_fulfilled:
                         cursor.execute("UPDATE orders SET status = %s WHERE id = %s;", ('fulfilled', order_id))
                         conn.commit()
+                        store['success_count'] += 1
+                        total_successful += 1
                         app_logger.info(f"Order {order_name} processing completed with at least one fulfillment.")
                     else:
                         cursor.execute("UPDATE orders SET status = %s WHERE id = %s;", ('failed', order_id))
                         conn.commit()
+                        store['failure_count'] += 1
+                        store['failed_orders'].append(order_name)
+                        total_failed += 1
                         app_logger.warning(f"No fulfillments were processed for order {order_name}.")
 
                 except Exception as e:
                     app_logger.error(f"An error occurred while processing order {order_name}: {str(e)}")
                     cursor.execute("UPDATE orders SET status = %s WHERE id = %s;", ('failed', order_id))
                     conn.commit()
+                    store['failure_count'] += 1
+                    store['failed_orders'].append(order_name)
+                    total_failed += 1
+
+            # Prepare the summary message
+            summary_message = "*Shopify Fulfillment Summary*\n\n"
+            summary_message += f"Total orders processed: {total_orders}\n"
+            summary_message += f"Successful: {total_successful}\n"
+            summary_message += f"Failed: {total_failed}\n\n"
+
+            # Add per-store details
+            for prefix, store in stores.items():
+                summary_message += f"Store with prefix '{prefix}':\n"
+                summary_message += f"- Successful: {store['success_count']}\n"
+                summary_message += f"- Failed: {store['failure_count']}\n"
+                if store['failed_orders']:
+                    summary_message += f"- Orders Failed: {', '.join(store['failed_orders'])}\n"
+                summary_message += "\n"
 
             # Send summary via Telegram
-            cursor.execute("SELECT status, COUNT(*) FROM orders WHERE created_at >= NOW() - INTERVAL '1 day' GROUP BY status;")
-            stats = cursor.fetchall()
-            summary_message = "*Shopify Fulfillment Summary (Last 24 Hours)*\n\n"
-            for status, count in stats:
-                summary_message += f"{status.capitalize()}: {count}\n"
-
             send_telegram_message(summary_message)
 
     except Exception as e:
