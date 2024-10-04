@@ -5,7 +5,8 @@ import requests
 import psycopg2
 import psycopg2.extras
 from logging.handlers import RotatingFileHandler
-from datetime import datetime, timezone
+import pytz
+from datetime import datetime
 
 # Set up logging to output to stdout
 log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -76,12 +77,16 @@ def process_orders():
         store_prefixes = {prefix.upper(): store for prefix, store in stores.items()}
 
         while True:
-            # Fetch pending orders whose scheduled_time <= current UTC time
-            cursor.execute("SELECT * FROM orders WHERE status = 'pending' AND scheduled_time <= NOW() ORDER BY scheduled_time ASC;")
+            # Fetch pending orders whose scheduled time has passed
+            cursor.execute("""
+            SELECT * FROM orders
+            WHERE status = 'pending' AND scheduled_time <= NOW() AT TIME ZONE 'UTC'
+            ORDER BY scheduled_time ASC;
+            """)
             orders = cursor.fetchall()
 
             if not orders:
-                app_logger.info("No pending orders to process at this time. Sleeping for 30 seconds.")
+                app_logger.info("No pending orders ready for fulfillment. Sleeping for 30 seconds.")
                 time.sleep(30)
                 continue
 
@@ -94,6 +99,7 @@ def process_orders():
                 order_name = order_row['order_name']
                 tracking_number = order_row['tracking_number']
                 carrier = order_row['carrier']
+                scheduled_time = order_row['scheduled_time']
 
                 # Determine which store the order belongs to based on the first two characters
                 order_prefix = order_name[:2].upper()
