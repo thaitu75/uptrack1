@@ -4,13 +4,10 @@ import os
 import requests
 import psycopg2
 import psycopg2.extras
-from datetime import datetime
-import pytz
+from datetime import datetime, timezone
 
 # Set up logging to output to stdout
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-app_logger = logging.getLogger('worker')
-
+log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 
 app_logger = logging.getLogger('worker')
 app_logger.setLevel(logging.INFO)
@@ -78,27 +75,18 @@ def process_orders():
         store_prefixes = {prefix.upper(): store for prefix, store in stores.items()}
 
         while True:
-        # Fetch pending orders whose scheduled time has passed
-        cursor.execute("""
-        SELECT * FROM orders
-        WHERE status = 'pending' AND scheduled_time <= NOW()
-        ORDER BY scheduled_time ASC;
-        """)
-        orders = cursor.fetchall()
+            # Fetch pending orders whose scheduled_time <= current UTC time
+            cursor.execute("""
+                SELECT * FROM orders 
+                WHERE status = 'pending' AND scheduled_time <= NOW() 
+                ORDER BY scheduled_time ASC;
+            """)
+            orders = cursor.fetchall()
 
-        if not orders:
-            current_time = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
-            app_logger.info(f"No pending orders to process at this time ({current_time} UTC). Sleeping for 30 seconds.")
-            time.sleep(30)
-            continue
-
-        # Log details of pending orders
-        app_logger.info(f"Found {len(orders)} pending orders to process:")
-        for order_row in orders:
-            order_id = order_row['id']
-            order_name = order_row['order_name']
-            scheduled_time = order_row['scheduled_time']
-            app_logger.info(f"Order ID: {order_id}, Order Name: {order_name}, Scheduled Time: {scheduled_time} UTC")
+            if not orders:
+                app_logger.info("No pending orders to process at this time. Sleeping for 30 seconds.")
+                time.sleep(30)
+                continue
 
             total_orders = len(orders)
             total_successful = 0
@@ -109,7 +97,6 @@ def process_orders():
                 order_name = order_row['order_name']
                 tracking_number = order_row['tracking_number']
                 carrier = order_row['carrier']
-                scheduled_time = order_row['scheduled_time']
 
                 # Determine which store the order belongs to based on the first two characters
                 order_prefix = order_name[:2].upper()
@@ -131,7 +118,7 @@ def process_orders():
 
                 # Initialize rate limiting variables
                 MIN_SLEEP_TIME = 0.5  # Minimum sleep time in seconds
-                MAX_SLEEP_TIME = 5  # Maximum sleep time in seconds
+                MAX_SLEEP_TIME = 5    # Maximum sleep time in seconds
 
                 # Create a session object to reuse TCP connections
                 session = requests.Session()
