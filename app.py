@@ -5,21 +5,12 @@ import logging
 import os
 import psycopg2
 from psycopg2.extras import execute_values
-from datetime import datetime, timezone, timedelta
+from logging.handlers import RotatingFileHandler
+import datetime
+import pytz
 
 # Streamlit page configuration
 st.set_page_config(page_title="Shopify Multi-Store Bulk Fulfillment Tool", layout="wide")
-
-# Initialize session state for scheduled date and time
-if 'scheduled_date' not in st.session_state:
-    # Default to current date in GMT+7
-    gmt7 = timezone(timedelta(hours=7))
-    st.session_state.scheduled_date = datetime.now(gmt7).date()
-
-if 'scheduled_time' not in st.session_state:
-    # Default to current time in GMT+7
-    gmt7 = timezone(timedelta(hours=7))
-    st.session_state.scheduled_time = datetime.now(gmt7).time()
 
 # Set up logging to output to stdout
 log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -37,7 +28,7 @@ logging.getLogger('urllib3').setLevel(logging.WARNING)
 # Set up the title and description
 st.title("Shopify Multi-Store Bulk Fulfillment Tool")
 st.write("""
-This tool allows you to fulfill multiple Shopify orders across multiple stores at once by entering the order information below.
+This tool allows you to schedule the fulfillment of multiple Shopify orders across multiple stores at once by entering the order information below.
 
 Please input the orders in the following format (one per line):
 
@@ -47,105 +38,77 @@ Please input the orders in the following format (one per line):
 
 """)
 
-# Display current time in GMT+7 for user reference
-gmt7 = timezone(timedelta(hours=7))
-current_time_gmt7 = datetime.now(gmt7)
-st.write(f"**Current Time (GMT+7):** {current_time_gmt7.strftime('%Y-%m-%d %H:%M:%S')}")
-
 # Input text area for orders
 input_text = st.text_area("Enter your orders here:", height=200)
 
-# Input for scheduled fulfillment date and time within a form to prevent immediate reruns
-with st.form("schedule_form"):
-    st.subheader("Schedule Fulfillment Time (GMT+7)")
+# Add date input for scheduled fulfillment date
+scheduled_date = st.date_input("Select fulfillment date")
 
-    # Date input
-    scheduled_date_input = st.date_input(
-        "Select the fulfillment date:",
-        value=st.session_state.scheduled_date
-    )
+# Add time input for scheduled fulfillment time
+scheduled_time = st.time_input("Select fulfillment time")
 
-    # Time input
-    scheduled_time_input = st.time_input(
-        "Select the fulfillment time:",
-        value=st.session_state.scheduled_time
-    )
-
-    # Submit button for the form
-    submit_button = st.form_submit_button(label="Submit Fulfillment Schedule")
-
-if submit_button:
+# Button to start processing
+if st.button("Fulfill Orders"):
     if not input_text.strip():
         st.warning("Please enter at least one order.")
     else:
-        # Combine date and time inputs into a datetime object
-        scheduled_datetime_input = datetime.combine(scheduled_date_input, scheduled_time_input)
-        # Assign GMT+7 timezone to the datetime
-        scheduled_datetime_gmt7 = scheduled_datetime_input.replace(tzinfo=gmt7)
-        # Convert to UTC
-        scheduled_time_utc = scheduled_datetime_gmt7.astimezone(timezone.utc)
+        # Combine date and time into a datetime object
+        scheduled_datetime = datetime.datetime.combine(scheduled_date, scheduled_time)
 
-        # Validate that the scheduled time is not in the past
-        current_time_gmt7 = datetime.now(gmt7)
-        if scheduled_datetime_gmt7 < current_time_gmt7:
-            st.error("Scheduled fulfillment time cannot be in the past. Please select a future time.")
-        else:
-            # Update session state with user inputs
-            st.session_state.scheduled_date = scheduled_date_input
-            st.session_state.scheduled_time = scheduled_time_input
+        # Handle time zone (GMT+7)
+        user_timezone = pytz.timezone("Asia/Bangkok")  # GMT+7 corresponds to Asia/Bangkok
+        scheduled_datetime = user_timezone.localize(scheduled_datetime)
 
-            # Save orders to database
-            try:
-                DATABASE_URL = os.environ.get('DATABASE_URL')
-                if not DATABASE_URL:
-                    st.error("Database URL not configured.")
-                else:
-                    # Connect to the database
-                    conn = psycopg2.connect(DATABASE_URL, sslmode='require')
-                    cursor = conn.cursor()
+        # Convert to UTC for storage
+        scheduled_datetime_utc = scheduled_datetime.astimezone(pytz.utc)
 
-                    # Create orders table if it doesn't exist
-                    cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS orders (
-                        id SERIAL PRIMARY KEY,
-                        order_name TEXT NOT NULL,
-                        tracking_number TEXT NOT NULL,
-                        carrier TEXT NOT NULL,
-                        status TEXT DEFAULT 'pending',
-                        scheduled_time TIMESTAMP WITH TIME ZONE NOT NULL,
-                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-                    );
-                    """)
-                    conn.commit()
+        # Save orders to database
+        try:
+            DATABASE_URL = os.environ.get('DATABASE_URL')
+            if not DATABASE_URL:
+                st.error("Database URL not configured.")
+            else:
+                # Connect to the database
+                conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+                cursor = conn.cursor()
 
-                    # Parse the input text and prepare data for insertion
-                    input_lines = input_text.strip().split('\n')
-                    orders_data = []
-                    for line in input_lines:
-                        parts = line.strip().split()
-                        if len(parts) != 3:
-                            app_logger.error(f"Invalid input line: {line}")
-                            st.warning(f"Invalid input line skipped: {line}")
-                            continue
-                        order_name, tracking_number, carrier = parts
+                # Create orders table if it doesn't exist, with scheduled_time column
+                cursor.execute("""
+                CREATE TABLE IF NOT EXISTS orders (
+                    id SERIAL PRIMARY KEY,
+                    order_name TEXT NOT NULL,
+                    tracking_number TEXT NOT NULL,
+                    carrier TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    scheduled_time TIMESTAMP WITH TIME ZONE NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                """)
+                conn.commit()
 
-                        orders_data.append((order_name, tracking_number, carrier, scheduled_time_utc))
+                # Parse the input text and prepare data for insertion
+                input_lines = input_text.strip().split('\n')
+                orders_data = []
+                for line in input_lines:
+                    parts = line.strip().split()
+                    if len(parts) != 3:
+                        app_logger.error(f"Invalid input line: {line}")
+                        continue
+                    order_name, tracking_number, carrier = parts
+                    orders_data.append((order_name, tracking_number, carrier, scheduled_datetime_utc))
 
-                    if orders_data:
-                        # Insert orders into the database
-                        insert_query = """
-                        INSERT INTO orders (order_name, tracking_number, carrier, scheduled_time)
-                        VALUES %s;
-                        """
-                        execute_values(cursor, insert_query, orders_data)
-                        conn.commit()
+                # Insert orders into the database
+                insert_query = """
+                INSERT INTO orders (order_name, tracking_number, carrier, scheduled_time)
+                VALUES %s;
+                """
+                execute_values(cursor, insert_query, orders_data)
+                conn.commit()
 
-                        st.success("Orders have been submitted for fulfillment at the scheduled time. You can close the browser now.")
-                    else:
-                        st.warning("No valid orders to submit.")
+                cursor.close()
+                conn.close()
 
-                    cursor.close()
-                    conn.close()
-            except Exception as e:
-                app_logger.error(f"Database error: {str(e)}")
-                st.error("An error occurred while saving orders to the database.")
+                st.success(f"Orders have been scheduled for fulfillment at {scheduled_datetime.strftime('%Y-%m-%d %H:%M:%S')} GMT+7. You can close the browser now.")
+        except Exception as e:
+            app_logger.error(f"Database error: {str(e)}")
+            st.error("An error occurred while saving orders to the database.")
