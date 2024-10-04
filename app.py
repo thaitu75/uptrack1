@@ -5,7 +5,6 @@ import logging
 import os
 import psycopg2
 from psycopg2.extras import execute_values
-from logging.handlers import RotatingFileHandler
 from datetime import datetime, timezone, timedelta
 
 # Streamlit page configuration
@@ -34,15 +33,34 @@ Please input the orders in the following format (one per line):
 `OrderName    TrackingNumber    Carrier`
 
 **Example:**
-
 """)
 
 # Input text area for orders
 input_text = st.text_area("Enter your orders here:", height=200)
 
 # Input for scheduled fulfillment date and time
-scheduled_date_input = st.date_input("Select the fulfillment date (GMT+7):", value=(datetime.now() + timedelta(hours=7)).date())
-scheduled_time_input = st.time_input("Select the fulfillment time (GMT+7):", value=(datetime.now() + timedelta(hours=7)).time())
+st.subheader("Schedule Fulfillment Time (GMT+7)")
+
+# Date input with default value as today
+scheduled_date_input = st.date_input(
+    "Select the fulfillment date (GMT+7):",
+    value=datetime.now(timezone(timedelta(hours=7))).date(),
+    min_value=datetime.now(timezone(timedelta(hours=7))).date()
+)
+
+# Time input with default value as current time + 1 hour to avoid immediate processing
+default_time = (datetime.now(timezone(timedelta(hours=7))) + timedelta(hours=1)).time()
+scheduled_time_input = st.time_input(
+    "Select the fulfillment time (GMT+7):",
+    value=default_time
+)
+
+# Display the selected scheduled datetime for verification
+scheduled_datetime_input = datetime.combine(scheduled_date_input, scheduled_time_input)
+scheduled_datetime_gmt7 = scheduled_datetime_input.replace(tzinfo=timezone(timedelta(hours=7)))
+scheduled_time_utc = scheduled_datetime_gmt7.astimezone(timezone.utc)
+
+st.markdown(f"**Scheduled Fulfillment Time (UTC):** {scheduled_time_utc.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
 # Button to start processing
 if st.button("Fulfill Orders"):
@@ -73,13 +91,6 @@ if st.button("Fulfill Orders"):
                 """)
                 conn.commit()
 
-                # Combine date and time inputs into a datetime object
-                scheduled_datetime_input = datetime.combine(scheduled_date_input, scheduled_time_input)
-                # Assign GMT+7 timezone to the datetime
-                scheduled_datetime_gmt7 = scheduled_datetime_input.replace(tzinfo=timezone(timedelta(hours=7)))
-                # Convert to UTC
-                scheduled_time_utc = scheduled_datetime_gmt7.astimezone(timezone.utc)
-
                 # Parse the input text and prepare data for insertion
                 input_lines = input_text.strip().split('\n')
                 orders_data = []
@@ -87,23 +98,28 @@ if st.button("Fulfill Orders"):
                     parts = line.strip().split()
                     if len(parts) != 3:
                         app_logger.error(f"Invalid input line: {line}")
+                        st.warning(f"Invalid input line (skipped): {line}")
                         continue
                     order_name, tracking_number, carrier = parts
 
                     orders_data.append((order_name, tracking_number, carrier, scheduled_time_utc))
 
-                # Insert orders into the database
-                insert_query = """
-                INSERT INTO orders (order_name, tracking_number, carrier, scheduled_time)
-                VALUES %s;
-                """
-                execute_values(cursor, insert_query, orders_data)
-                conn.commit()
+                if not orders_data:
+                    st.error("No valid orders to submit.")
+                else:
+                    # Insert orders into the database
+                    insert_query = """
+                    INSERT INTO orders (order_name, tracking_number, carrier, scheduled_time)
+                    VALUES %s;
+                    """
+                    execute_values(cursor, insert_query, orders_data)
+                    conn.commit()
 
-                cursor.close()
-                conn.close()
+                    cursor.close()
+                    conn.close()
 
-                st.success("Orders have been submitted for fulfillment. You can close the browser now.")
+                    st.success(f"{len(orders_data)} orders have been submitted for fulfillment at {scheduled_datetime_gmt7.strftime('%Y-%m-%d %H:%M:%S')} GMT+7. You can close the browser now.")
+
         except Exception as e:
             app_logger.error(f"Database error: {str(e)}")
             st.error("An error occurred while saving orders to the database.")
