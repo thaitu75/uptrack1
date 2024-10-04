@@ -4,6 +4,7 @@ import os
 import requests
 import psycopg2
 import psycopg2.extras
+from logging.handlers import RotatingFileHandler
 from datetime import datetime, timezone
 
 # Set up logging to output to stdout
@@ -76,11 +77,7 @@ def process_orders():
 
         while True:
             # Fetch pending orders whose scheduled_time <= current UTC time
-            cursor.execute("""
-                SELECT * FROM orders 
-                WHERE status = 'pending' AND scheduled_time <= NOW() 
-                ORDER BY scheduled_time ASC;
-            """)
+            cursor.execute("SELECT * FROM orders WHERE status = 'pending' AND scheduled_time <= NOW() ORDER BY scheduled_time ASC;")
             orders = cursor.fetchall()
 
             if not orders:
@@ -118,7 +115,7 @@ def process_orders():
 
                 # Initialize rate limiting variables
                 MIN_SLEEP_TIME = 0.5  # Minimum sleep time in seconds
-                MAX_SLEEP_TIME = 5    # Maximum sleep time in seconds
+                MAX_SLEEP_TIME = 5  # Maximum sleep time in seconds
 
                 # Create a session object to reuse TCP connections
                 session = requests.Session()
