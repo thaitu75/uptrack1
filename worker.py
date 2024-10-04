@@ -4,12 +4,13 @@ import os
 import requests
 import psycopg2
 import psycopg2.extras
-from logging.handlers import RotatingFileHandler
-import pytz
 from datetime import datetime
+import pytz
 
 # Set up logging to output to stdout
-log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+app_logger = logging.getLogger('worker')
+
 
 app_logger = logging.getLogger('worker')
 app_logger.setLevel(logging.INFO)
@@ -77,18 +78,27 @@ def process_orders():
         store_prefixes = {prefix.upper(): store for prefix, store in stores.items()}
 
         while True:
-            # Fetch pending orders whose scheduled time has passed
-            cursor.execute("""
-            SELECT * FROM orders
-            WHERE status = 'pending' AND scheduled_time <= NOW() AT TIME ZONE 'UTC'
-            ORDER BY scheduled_time ASC;
-            """)
-            orders = cursor.fetchall()
+        # Fetch pending orders whose scheduled time has passed
+        cursor.execute("""
+        SELECT * FROM orders
+        WHERE status = 'pending' AND scheduled_time <= NOW()
+        ORDER BY scheduled_time ASC;
+        """)
+        orders = cursor.fetchall()
 
-            if not orders:
-                app_logger.info("No pending orders ready for fulfillment. Sleeping for 30 seconds.")
-                time.sleep(30)
-                continue
+        if not orders:
+            current_time = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+            app_logger.info(f"No pending orders to process at this time ({current_time} UTC). Sleeping for 30 seconds.")
+            time.sleep(30)
+            continue
+
+        # Log details of pending orders
+        app_logger.info(f"Found {len(orders)} pending orders to process:")
+        for order_row in orders:
+            order_id = order_row['id']
+            order_name = order_row['order_name']
+            scheduled_time = order_row['scheduled_time']
+            app_logger.info(f"Order ID: {order_id}, Order Name: {order_name}, Scheduled Time: {scheduled_time} UTC")
 
             total_orders = len(orders)
             total_successful = 0
