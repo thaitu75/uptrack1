@@ -6,6 +6,7 @@ import psycopg2
 import psycopg2.extras
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timezone
+import pytz
 
 # Set up logging to output to stdout
 log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -76,9 +77,18 @@ def process_orders():
         store_prefixes = {prefix.upper(): store for prefix, store in stores.items()}
 
         while True:
+            # Get current UTC time
+            current_utc_time = datetime.now(timezone.utc)
+            app_logger.info(f"Current UTC time: {current_utc_time.isoformat()}")
+
             # Fetch pending orders whose scheduled_time <= current UTC time
-            cursor.execute("SELECT * FROM orders WHERE status = 'pending' AND scheduled_time <= NOW() ORDER BY scheduled_time ASC;")
+            cursor.execute("""
+            SELECT * FROM orders
+            WHERE status = 'pending' AND scheduled_time <= %s
+            ORDER BY scheduled_time ASC;
+            """, (current_utc_time,))
             orders = cursor.fetchall()
+            app_logger.info(f"Fetched {len(orders)} pending orders scheduled for fulfillment.")
 
             if not orders:
                 app_logger.info("No pending orders to process at this time. Sleeping for 30 seconds.")
