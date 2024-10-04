@@ -10,6 +10,17 @@ from datetime import datetime, timezone, timedelta
 # Streamlit page configuration
 st.set_page_config(page_title="Shopify Multi-Store Bulk Fulfillment Tool", layout="wide")
 
+# Initialize session state for scheduled date and time
+if 'scheduled_date' not in st.session_state:
+    # Default to current date in GMT+7
+    gmt7 = timezone(timedelta(hours=7))
+    st.session_state.scheduled_date = datetime.now(gmt7).date()
+
+if 'scheduled_time' not in st.session_state:
+    # Default to current time in GMT+7
+    gmt7 = timezone(timedelta(hours=7))
+    st.session_state.scheduled_time = datetime.now(gmt7).time()
+
 # Set up logging to output to stdout
 log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 
@@ -33,40 +44,39 @@ Please input the orders in the following format (one per line):
 `OrderName    TrackingNumber    Carrier`
 
 **Example:**
+
 """)
 
 # Input text area for orders
 input_text = st.text_area("Enter your orders here:", height=200)
 
-# Input for scheduled fulfillment date and time
-st.subheader("Schedule Fulfillment Time (GMT+7)")
+# Input for scheduled fulfillment date and time within a form to prevent immediate reruns
+with st.form("schedule_form"):
+    st.subheader("Schedule Fulfillment Time (GMT+7)")
 
-# Date input with default value as today
-scheduled_date_input = st.date_input(
-    "Select the fulfillment date (GMT+7):",
-    value=datetime.now(timezone(timedelta(hours=7))).date(),
-    min_value=datetime.now(timezone(timedelta(hours=7))).date()
-)
+    # Date input
+    scheduled_date_input = st.date_input(
+        "Select the fulfillment date:",
+        value=st.session_state.scheduled_date
+    )
 
-# Time input with default value as current time + 1 hour to avoid immediate processing
-default_time = (datetime.now(timezone(timedelta(hours=7))) + timedelta(hours=1)).time()
-scheduled_time_input = st.time_input(
-    "Select the fulfillment time (GMT+7):",
-    value=default_time
-)
+    # Time input
+    scheduled_time_input = st.time_input(
+        "Select the fulfillment time:",
+        value=st.session_state.scheduled_time
+    )
 
-# Display the selected scheduled datetime for verification
-scheduled_datetime_input = datetime.combine(scheduled_date_input, scheduled_time_input)
-scheduled_datetime_gmt7 = scheduled_datetime_input.replace(tzinfo=timezone(timedelta(hours=7)))
-scheduled_time_utc = scheduled_datetime_gmt7.astimezone(timezone.utc)
+    # Submit button for the form
+    submit_button = st.form_submit_button(label="Submit Fulfillment Schedule")
 
-st.markdown(f"**Scheduled Fulfillment Time (UTC):** {scheduled_time_utc.strftime('%Y-%m-%d %H:%M:%S %Z')}")
-
-# Button to start processing
-if st.button("Fulfill Orders"):
+if submit_button:
     if not input_text.strip():
         st.warning("Please enter at least one order.")
     else:
+        # Update session state with user inputs
+        st.session_state.scheduled_date = scheduled_date_input
+        st.session_state.scheduled_time = scheduled_time_input
+
         # Save orders to database
         try:
             DATABASE_URL = os.environ.get('DATABASE_URL')
@@ -91,6 +101,14 @@ if st.button("Fulfill Orders"):
                 """)
                 conn.commit()
 
+                # Combine date and time inputs into a datetime object
+                scheduled_datetime_input = datetime.combine(scheduled_date_input, scheduled_time_input)
+                # Assign GMT+7 timezone to the datetime
+                gmt7 = timezone(timedelta(hours=7))
+                scheduled_datetime_gmt7 = scheduled_datetime_input.replace(tzinfo=gmt7)
+                # Convert to UTC
+                scheduled_time_utc = scheduled_datetime_gmt7.astimezone(timezone.utc)
+
                 # Parse the input text and prepare data for insertion
                 input_lines = input_text.strip().split('\n')
                 orders_data = []
@@ -98,15 +116,13 @@ if st.button("Fulfill Orders"):
                     parts = line.strip().split()
                     if len(parts) != 3:
                         app_logger.error(f"Invalid input line: {line}")
-                        st.warning(f"Invalid input line (skipped): {line}")
+                        st.warning(f"Invalid input line skipped: {line}")
                         continue
                     order_name, tracking_number, carrier = parts
 
                     orders_data.append((order_name, tracking_number, carrier, scheduled_time_utc))
 
-                if not orders_data:
-                    st.error("No valid orders to submit.")
-                else:
+                if orders_data:
                     # Insert orders into the database
                     insert_query = """
                     INSERT INTO orders (order_name, tracking_number, carrier, scheduled_time)
@@ -115,11 +131,12 @@ if st.button("Fulfill Orders"):
                     execute_values(cursor, insert_query, orders_data)
                     conn.commit()
 
-                    cursor.close()
-                    conn.close()
+                    st.success("Orders have been submitted for fulfillment at the scheduled time. You can close the browser now.")
+                else:
+                    st.warning("No valid orders to submit.")
 
-                    st.success(f"{len(orders_data)} orders have been submitted for fulfillment at {scheduled_datetime_gmt7.strftime('%Y-%m-%d %H:%M:%S')} GMT+7. You can close the browser now.")
-
+                cursor.close()
+                conn.close()
         except Exception as e:
             app_logger.error(f"Database error: {str(e)}")
             st.error("An error occurred while saving orders to the database.")
