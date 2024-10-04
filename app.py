@@ -5,20 +5,21 @@ import logging
 import os
 import psycopg2
 from psycopg2.extras import execute_values
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
+import pytz
 
 # Streamlit page configuration
 st.set_page_config(page_title="Shopify Multi-Store Bulk Fulfillment Tool", layout="wide")
 
 # Initialize session state for scheduled date and time
+gmt7 = pytz.timezone('Asia/Bangkok')  # GMT+7 time zone
+
 if 'scheduled_date' not in st.session_state:
     # Default to current date in GMT+7
-    gmt7 = timezone(timedelta(hours=7))
     st.session_state.scheduled_date = datetime.now(gmt7).date()
 
 if 'scheduled_time' not in st.session_state:
     # Default to current time in GMT+7
-    gmt7 = timezone(timedelta(hours=7))
     st.session_state.scheduled_time = datetime.now(gmt7).time()
 
 # Set up logging to output to stdout
@@ -48,7 +49,6 @@ Please input the orders in the following format (one per line):
 """)
 
 # Display current time in GMT+7 for user reference
-gmt7 = timezone(timedelta(hours=7))
 current_time_gmt7 = datetime.now(gmt7)
 st.write(f"**Current Time (GMT+7):** {current_time_gmt7.strftime('%Y-%m-%d %H:%M:%S')}")
 
@@ -78,12 +78,14 @@ if submit_button:
     if not input_text.strip():
         st.warning("Please enter at least one order.")
     else:
-        # Combine date and time inputs into a datetime object
+        # Combine date and time inputs into a naive datetime object
         scheduled_datetime_input = datetime.combine(scheduled_date_input, scheduled_time_input)
-        # Assign GMT+7 timezone to the datetime
-        scheduled_datetime_gmt7 = scheduled_datetime_input.replace(tzinfo=gmt7)
+
+        # Localize the naive datetime to GMT+7
+        scheduled_datetime_gmt7 = gmt7.localize(scheduled_datetime_input)
+
         # Convert to UTC
-        scheduled_time_utc = scheduled_datetime_gmt7.astimezone(timezone.utc)
+        scheduled_time_utc = scheduled_datetime_gmt7.astimezone(pytz.utc)
 
         # Validate that the scheduled time is not in the past
         current_time_gmt7 = datetime.now(gmt7)
