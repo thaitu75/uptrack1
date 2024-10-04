@@ -40,8 +40,9 @@ Please input the orders in the following format (one per line):
 # Input text area for orders
 input_text = st.text_area("Enter your orders here:", height=200)
 
-# Input for scheduled fulfillment time
-scheduled_time_input = st.datetime_input("Select the fulfillment time (GMT+7):", value=datetime.now() + timedelta(hours=7))
+# Input for scheduled fulfillment date and time
+scheduled_date_input = st.date_input("Select the fulfillment date (GMT+7):", value=(datetime.now() + timedelta(hours=7)).date())
+scheduled_time_input = st.time_input("Select the fulfillment time (GMT+7):", value=(datetime.now() + timedelta(hours=7)).time())
 
 # Button to start processing
 if st.button("Fulfill Orders"):
@@ -72,6 +73,13 @@ if st.button("Fulfill Orders"):
                 """)
                 conn.commit()
 
+                # Combine date and time inputs into a datetime object
+                scheduled_datetime_input = datetime.combine(scheduled_date_input, scheduled_time_input)
+                # Assign GMT+7 timezone to the datetime
+                scheduled_datetime_gmt7 = scheduled_datetime_input.replace(tzinfo=timezone(timedelta(hours=7)))
+                # Convert to UTC
+                scheduled_time_utc = scheduled_datetime_gmt7.astimezone(timezone.utc)
+
                 # Parse the input text and prepare data for insertion
                 input_lines = input_text.strip().split('\n')
                 orders_data = []
@@ -81,11 +89,6 @@ if st.button("Fulfill Orders"):
                         app_logger.error(f"Invalid input line: {line}")
                         continue
                     order_name, tracking_number, carrier = parts
-
-                    # Convert scheduled_time_input from GMT+7 to UTC
-                    # scheduled_time_input is naive datetime in local time; we need to make it timezone-aware
-                    scheduled_time_gmt7 = scheduled_time_input.replace(tzinfo=timezone(timedelta(hours=7)))
-                    scheduled_time_utc = scheduled_time_gmt7.astimezone(timezone.utc)
 
                     orders_data.append((order_name, tracking_number, carrier, scheduled_time_utc))
 
