@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import pytz
 
 # Streamlit page configuration
-st.set_page_config(page_title="Shopify Multi-Store Bulk Fulfillment Tool", layout="wide")
+st.set_page_config(page_title="ok", layout="wide")
 
 # Initialize session state for scheduled date and time
 gmt7 = pytz.timezone('Asia/Bangkok')  # GMT+7 time zone
@@ -32,18 +32,6 @@ app_logger.addHandler(stream_handler)
 # Suppress other loggers
 logging.getLogger('urllib3').setLevel(logging.WARNING)
 
-# Set up the title and description
-st.title("Shopify Multi-Store Bulk Fulfillment Tool")
-st.write("""
-This tool allows you to fulfill multiple Shopify orders across multiple stores at once by entering the order information below.
-
-Please input the orders in the following format (one per line):
-
-`OrderName    TrackingNumber    Carrier`
-
-**Example:**
-
-""")
 
 # Display current time in GMT+7 for user reference
 current_time_gmt7 = datetime.now(gmt7)
