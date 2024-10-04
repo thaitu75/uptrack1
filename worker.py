@@ -36,9 +36,7 @@ def load_stores():
                 stores[order_prefix] = {
                     'store_url': store_url,
                     'access_token': access_token,
-                    'success_count': 0,
-                    'failure_count': 0,
-                    'failed_orders': []
+                    # Remove the initialization of counts here
                 }
             else:
                 app_logger.error(f"Missing store URL or access token for store {store_number}")
@@ -72,11 +70,16 @@ def process_orders():
         conn = psycopg2.connect(DATABASE_URL, sslmode='require')
         cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-        # Load stores
-        stores = load_stores()
-        store_prefixes = {prefix.upper(): store for prefix, store in stores.items()}
-
         while True:
+            # Load stores and reset per-store counts
+            stores = load_stores()
+            for store in stores.values():
+                store['success_count'] = 0
+                store['failure_count'] = 0
+                store['failed_orders'] = []
+
+            store_prefixes = {prefix.upper(): store for prefix, store in stores.items()}
+
             # Get current UTC time
             current_utc_time = datetime.now(timezone.utc)
             app_logger.info(f"Current UTC time: {current_utc_time.isoformat()}")
@@ -168,7 +171,7 @@ def process_orders():
                         cursor.execute("UPDATE orders SET status = %s WHERE id = %s;", ('failed', order_id))
                         conn.commit()
                         store['failure_count'] += 1
-                        store['failed_orders'].append(order_name)
+                        store.setdefault('failed_orders', []).append(order_name)
                         total_failed += 1
                         continue
 
@@ -178,7 +181,7 @@ def process_orders():
                         cursor.execute("UPDATE orders SET status = %s WHERE id = %s;", ('failed', order_id))
                         conn.commit()
                         store['failure_count'] += 1
-                        store['failed_orders'].append(order_name)
+                        store.setdefault('failed_orders', []).append(order_name)
                         total_failed += 1
                         continue
 
@@ -195,7 +198,7 @@ def process_orders():
                         cursor.execute("UPDATE orders SET status = %s WHERE id = %s;", ('failed', order_id))
                         conn.commit()
                         store['failure_count'] += 1
-                        store['failed_orders'].append(order_name)
+                        store.setdefault('failed_orders', []).append(order_name)
                         total_failed += 1
                         continue
 
@@ -205,7 +208,7 @@ def process_orders():
                         cursor.execute("UPDATE orders SET status = %s WHERE id = %s;", ('failed', order_id))
                         conn.commit()
                         store['failure_count'] += 1
-                        store['failed_orders'].append(order_name)
+                        store.setdefault('failed_orders', []).append(order_name)
                         total_failed += 1
                         continue
 
@@ -263,7 +266,7 @@ def process_orders():
                         cursor.execute("UPDATE orders SET status = %s WHERE id = %s;", ('failed', order_id))
                         conn.commit()
                         store['failure_count'] += 1
-                        store['failed_orders'].append(order_name)
+                        store.setdefault('failed_orders', []).append(order_name)
                         total_failed += 1
                         app_logger.warning(f"No fulfillments were processed for order {order_name}.")
 
@@ -272,7 +275,7 @@ def process_orders():
                     cursor.execute("UPDATE orders SET status = %s WHERE id = %s;", ('failed', order_id))
                     conn.commit()
                     store['failure_count'] += 1
-                    store['failed_orders'].append(order_name)
+                    store.setdefault('failed_orders', []).append(order_name)
                     total_failed += 1
 
             # Prepare the summary message
@@ -284,9 +287,9 @@ def process_orders():
             # Add per-store details
             for prefix, store in stores.items():
                 summary_message += f"Store with prefix '{prefix}':\n"
-                summary_message += f"- Successful: {store['success_count']}\n"
-                summary_message += f"- Failed: {store['failure_count']}\n"
-                if store['failed_orders']:
+                summary_message += f"- Successful: {store.get('success_count', 0)}\n"
+                summary_message += f"- Failed: {store.get('failure_count', 0)}\n"
+                if store.get('failed_orders'):
                     summary_message += f"- Orders Failed: {', '.join(store['failed_orders'])}\n"
                 summary_message += "\n"
 
