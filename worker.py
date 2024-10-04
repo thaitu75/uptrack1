@@ -5,6 +5,7 @@ import requests
 import psycopg2
 import psycopg2.extras
 from logging.handlers import RotatingFileHandler
+from datetime import datetime, timezone
 
 # Set up logging to output to stdout
 log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -75,12 +76,12 @@ def process_orders():
         store_prefixes = {prefix.upper(): store for prefix, store in stores.items()}
 
         while True:
-            # Fetch pending orders
-            cursor.execute("SELECT * FROM orders WHERE status = 'pending';")
+            # Fetch pending orders whose scheduled_time <= current UTC time
+            cursor.execute("SELECT * FROM orders WHERE status = 'pending' AND scheduled_time <= NOW() ORDER BY scheduled_time ASC;")
             orders = cursor.fetchall()
 
             if not orders:
-                app_logger.info("No pending orders. Sleeping for 30 seconds.")
+                app_logger.info("No pending orders to process at this time. Sleeping for 30 seconds.")
                 time.sleep(30)
                 continue
 
