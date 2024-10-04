@@ -1,6 +1,5 @@
 import streamlit as st
 import requests
-import time
 import logging
 import os
 import psycopg2
@@ -15,18 +14,16 @@ st.set_page_config(page_title="Shopify Multi-Store Bulk Fulfillment Tool", layou
 gmt7 = pytz.timezone('Asia/Bangkok')  # GMT+7 time zone
 
 if 'scheduled_date' not in st.session_state:
-    # Default to current date in GMT+7
     st.session_state.scheduled_date = datetime.now(gmt7).date()
 
 if 'scheduled_time' not in st.session_state:
-    # Default to current time in GMT+7
     st.session_state.scheduled_time = datetime.now(gmt7).time()
 
 # Set up logging to output to stdout
 log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 
 app_logger = logging.getLogger('root')
-app_logger.setLevel(logging.INFO)
+app_logger.setLevel(logging.WARNING)  # Set to WARNING to reduce verbosity
 
 stream_handler = logging.StreamHandler()
 stream_handler.setFormatter(log_formatter)
@@ -97,57 +94,56 @@ if submit_button:
             st.session_state.scheduled_time = scheduled_time_input
 
             # Save orders to database
-            try:
-                DATABASE_URL = os.environ.get('DATABASE_URL')
-                if not DATABASE_URL:
-                    st.error("Database URL not configured.")
-                else:
-                    # Connect to the database
-                    conn = psycopg2.connect(DATABASE_URL, sslmode='require')
-                    cursor = conn.cursor()
+            DATABASE_URL = os.environ.get('DATABASE_URL')
+            if not DATABASE_URL:
+                st.error("Database URL not configured.")
+            else:
+                try:
+                    # Use a context manager to ensure the connection is closed properly
+                    with psycopg2.connect(DATABASE_URL, sslmode='require') as conn:
+                        with conn.cursor() as cursor:
+                            # Create orders table if it doesn't exist
+                            cursor.execute("""
+                            CREATE TABLE IF NOT EXISTS orders (
+                                id SERIAL PRIMARY KEY,
+                                order_name TEXT NOT NULL,
+                                tracking_number TEXT NOT NULL,
+                                carrier TEXT NOT NULL,
+                                status TEXT DEFAULT 'pending',
+                                scheduled_time TIMESTAMP WITH TIME ZONE NOT NULL,
+                                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                            );
+                            """)
+                            conn.commit()
 
-                    # Create orders table if it doesn't exist
-                    cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS orders (
-                        id SERIAL PRIMARY KEY,
-                        order_name TEXT NOT NULL,
-                        tracking_number TEXT NOT NULL,
-                        carrier TEXT NOT NULL,
-                        status TEXT DEFAULT 'pending',
-                        scheduled_time TIMESTAMP WITH TIME ZONE NOT NULL,
-                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-                    );
-                    """)
-                    conn.commit()
+                            # Parse the input text and prepare data for insertion
+                            input_lines = input_text.strip().split('\n')
+                            orders_data = []
+                            for line in input_lines:
+                                parts = line.strip().split()
+                                if len(parts) != 3:
+                                    app_logger.error(f"Invalid input line: {line}")
+                                    st.warning(f"Invalid input line skipped: {line}")
+                                    continue
+                                order_name, tracking_number, carrier = parts
 
-                    # Parse the input text and prepare data for insertion
-                    input_lines = input_text.strip().split('\n')
-                    orders_data = []
-                    for line in input_lines:
-                        parts = line.strip().split()
-                        if len(parts) != 3:
-                            app_logger.error(f"Invalid input line: {line}")
-                            st.warning(f"Invalid input line skipped: {line}")
-                            continue
-                        order_name, tracking_number, carrier = parts
+                                orders_data.append((order_name, tracking_number, carrier, scheduled_time_utc))
 
-                        orders_data.append((order_name, tracking_number, carrier, scheduled_time_utc))
+                            if orders_data:
+                                # Insert orders into the database
+                                insert_query = """
+                                INSERT INTO orders (order_name, tracking_number, carrier, scheduled_time)
+                                VALUES %s;
+                                """
+                                execute_values(cursor, insert_query, orders_data)
+                                conn.commit()
 
-                    if orders_data:
-                        # Insert orders into the database
-                        insert_query = """
-                        INSERT INTO orders (order_name, tracking_number, carrier, scheduled_time)
-                        VALUES %s;
-                        """
-                        execute_values(cursor, insert_query, orders_data)
-                        conn.commit()
-
-                        st.success("Orders have been submitted for fulfillment at the scheduled time. You can close the browser now.")
-                    else:
-                        st.warning("No valid orders to submit.")
-
-                    cursor.close()
-                    conn.close()
-            except Exception as e:
-                app_logger.error(f"Database error: {str(e)}")
-                st.error("An error occurred while saving orders to the database.")
+                                st.success("Orders have been submitted for fulfillment at the scheduled time. You can close the browser now.")
+                            else:
+                                st.warning("No valid orders to submit.")
+                except psycopg2.DatabaseError as db_error:
+                    app_logger.error(f"Database error: {str(db_error)}")
+                    st.error("An error occurred while saving orders to the database.")
+                except Exception as e:
+                    app_logger.error(f"Unexpected error: {str(e)}")
+                    st.error("An unexpected error occurred.")
