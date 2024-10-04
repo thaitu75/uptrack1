@@ -6,6 +6,7 @@ import os
 import psycopg2
 from psycopg2.extras import execute_values
 from logging.handlers import RotatingFileHandler
+from datetime import datetime, timezone, timedelta
 
 # Streamlit page configuration
 st.set_page_config(page_title="Shopify Multi-Store Bulk Fulfillment Tool", layout="wide")
@@ -39,6 +40,9 @@ Please input the orders in the following format (one per line):
 # Input text area for orders
 input_text = st.text_area("Enter your orders here:", height=200)
 
+# Input for scheduled fulfillment time
+scheduled_time_input = st.datetime_input("Select the fulfillment time (GMT+7):", value=datetime.now() + timedelta(hours=7))
+
 # Button to start processing
 if st.button("Fulfill Orders"):
     if not input_text.strip():
@@ -62,7 +66,8 @@ if st.button("Fulfill Orders"):
                     tracking_number TEXT NOT NULL,
                     carrier TEXT NOT NULL,
                     status TEXT DEFAULT 'pending',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    scheduled_time TIMESTAMP WITH TIME ZONE NOT NULL,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 );
                 """)
                 conn.commit()
@@ -76,11 +81,17 @@ if st.button("Fulfill Orders"):
                         app_logger.error(f"Invalid input line: {line}")
                         continue
                     order_name, tracking_number, carrier = parts
-                    orders_data.append((order_name, tracking_number, carrier))
+
+                    # Convert scheduled_time_input from GMT+7 to UTC
+                    # scheduled_time_input is naive datetime in local time; we need to make it timezone-aware
+                    scheduled_time_gmt7 = scheduled_time_input.replace(tzinfo=timezone(timedelta(hours=7)))
+                    scheduled_time_utc = scheduled_time_gmt7.astimezone(timezone.utc)
+
+                    orders_data.append((order_name, tracking_number, carrier, scheduled_time_utc))
 
                 # Insert orders into the database
                 insert_query = """
-                INSERT INTO orders (order_name, tracking_number, carrier)
+                INSERT INTO orders (order_name, tracking_number, carrier, scheduled_time)
                 VALUES %s;
                 """
                 execute_values(cursor, insert_query, orders_data)
