@@ -75,17 +75,24 @@ def display_scheduled_orders():
 
         # Convert scheduled_time to GMT+7
         scheduled_time_gmt7 = scheduled_time_utc.astimezone(gmt7)
-        scheduled_time_str = scheduled_time_gmt7.strftime('%d/%m/%Y %H:%M')
 
-        # Group by scheduled_time_str
-        if scheduled_time_str not in summary:
-            summary[scheduled_time_str] = {}
-        summary[scheduled_time_str][status] = order_count
+        # Use datetime object as key for accurate sorting
+        scheduled_time_key = scheduled_time_gmt7
 
-    # Display the summary
-    for scheduled_time_str in sorted(summary.keys()):
+        # Group by scheduled_time_key (datetime object)
+        if scheduled_time_key not in summary:
+            summary[scheduled_time_key] = {}
+        summary[scheduled_time_key][status] = order_count
+
+    # Get the scheduled times, sort them, and take the first 7
+    sorted_scheduled_times = sorted(summary.keys())
+    top_scheduled_times = sorted_scheduled_times[:7]
+
+    # Display the summary for the top 7 scheduled times
+    for scheduled_time_key in top_scheduled_times:
+        scheduled_time_str = scheduled_time_key.strftime('%d/%m/%Y %H:%M')
         st.sidebar.write(f"**{scheduled_time_str}**")
-        statuses = summary[scheduled_time_str]
+        statuses = summary[scheduled_time_key]
         for status, count in statuses.items():
             if status == 'fulfilled':
                 st.sidebar.write(f"- {count} orders fulfilled successfully")
@@ -99,7 +106,6 @@ display_scheduled_orders()
 
 # --- End Sidebar Code ---
 
-# Set up the title and description
 
 
 # Display current time in GMT+7 for user reference
