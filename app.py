@@ -3,7 +3,7 @@ import requests
 import logging
 import os
 import psycopg2
-from psycopg2.extras import execute_values
+from psycopg2.extras import execute_values, DictCursor
 from datetime import datetime, timedelta
 import pytz
 
@@ -31,6 +31,75 @@ app_logger.addHandler(stream_handler)
 
 # Suppress other loggers
 logging.getLogger('urllib3').setLevel(logging.WARNING)
+
+# --- Begin Sidebar Code ---
+
+# Function to fetch scheduled orders from the database
+def fetch_scheduled_orders():
+    DATABASE_URL = os.environ.get('DATABASE_URL')
+    if not DATABASE_URL:
+        st.sidebar.error("Database URL not configured.")
+        return []
+
+    try:
+        with psycopg2.connect(DATABASE_URL, sslmode='require') as conn:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                cursor.execute("""
+                SELECT scheduled_time, status, COUNT(*) as order_count
+                FROM orders
+                GROUP BY scheduled_time, status
+                ORDER BY scheduled_time ASC;
+                """)
+                orders = cursor.fetchall()
+                return orders
+    except Exception as e:
+        app_logger.error(f"Database error while fetching scheduled orders: {str(e)}")
+        st.sidebar.error("Error fetching scheduled orders.")
+        return []
+
+# Display scheduled orders in the sidebar
+def display_scheduled_orders():
+    st.sidebar.title("Scheduled Orders")
+
+    orders = fetch_scheduled_orders()
+    if not orders:
+        st.sidebar.info("No scheduled orders found.")
+        return
+
+    # Prepare a summary dictionary
+    summary = {}
+    for order in orders:
+        scheduled_time_utc = order['scheduled_time']
+        status = order['status']
+        order_count = order['order_count']
+
+        # Convert scheduled_time to GMT+7
+        scheduled_time_gmt7 = scheduled_time_utc.astimezone(gmt7)
+        scheduled_time_str = scheduled_time_gmt7.strftime('%d/%m/%Y %H:%M')
+
+        # Group by scheduled_time_str
+        if scheduled_time_str not in summary:
+            summary[scheduled_time_str] = {}
+        summary[scheduled_time_str][status] = order_count
+
+    # Display the summary
+    for scheduled_time_str in sorted(summary.keys()):
+        st.sidebar.write(f"**{scheduled_time_str}**")
+        statuses = summary[scheduled_time_str]
+        for status, count in statuses.items():
+            if status == 'fulfilled':
+                st.sidebar.write(f"- {count} orders fulfilled successfully")
+            elif status == 'pending':
+                st.sidebar.write(f"- {count} orders pending fulfillment")
+            elif status == 'failed':
+                st.sidebar.write(f"- {count} orders failed to fulfill")
+        st.sidebar.write("---")
+
+display_scheduled_orders()
+
+# --- End Sidebar Code ---
+
+# Set up the title and description
 
 
 # Display current time in GMT+7 for user reference
@@ -127,6 +196,9 @@ if submit_button:
                                 conn.commit()
 
                                 st.success("Orders have been submitted for fulfillment at the scheduled time. You can close the browser now.")
+
+                                # Refresh the sidebar
+                                display_scheduled_orders()
                             else:
                                 st.warning("No valid orders to submit.")
                 except psycopg2.DatabaseError as db_error:
