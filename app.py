@@ -48,7 +48,7 @@ def fetch_scheduled_orders():
                 SELECT scheduled_time, status, COUNT(*) as order_count
                 FROM orders
                 GROUP BY scheduled_time, status
-                ORDER BY scheduled_time ASC;
+                ORDER BY scheduled_time DESC;
                 """)
                 orders = cursor.fetchall()
                 return orders
@@ -84,8 +84,8 @@ def display_scheduled_orders():
             summary[scheduled_time_key] = {}
         summary[scheduled_time_key][status] = order_count
 
-    # Get the scheduled times, sort them, and take the first 7
-    sorted_scheduled_times = sorted(summary.keys())
+    # Get the scheduled times, sort them in descending order, and take the first 7
+    sorted_scheduled_times = sorted(summary.keys(), reverse=True)
     top_scheduled_times = sorted_scheduled_times[:7]
 
     # Display the summary for the top 7 scheduled times
@@ -105,8 +105,6 @@ def display_scheduled_orders():
 display_scheduled_orders()
 
 # --- End Sidebar Code ---
-
-
 
 # Display current time in GMT+7 for user reference
 current_time_gmt7 = datetime.now(gmt7)
