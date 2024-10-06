@@ -4,7 +4,7 @@ import time
 import logging
 import os
 import psycopg2
-from psycopg2.extras import execute_values
+from psycopg2.extras import execute_values, DictCursor
 from datetime import datetime, timedelta
 import pytz
 
@@ -34,6 +34,90 @@ app_logger.addHandler(stream_handler)
 
 # Suppress other loggers
 logging.getLogger('urllib3').setLevel(logging.WARNING)
+
+# Function to get the scheduled orders for the sidebar
+def get_recent_scheduled_orders():
+    DATABASE_URL = os.environ.get('DATABASE_URL')
+    if not DATABASE_URL:
+        st.error("Database URL not configured.")
+        return []
+
+    try:
+        # Connect to the database
+        conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+        cursor = conn.cursor(cursor_factory=DictCursor)
+
+        # Query to get the 7 most recent scheduled times
+        cursor.execute("""
+        SELECT scheduled_time
+        FROM orders
+        GROUP BY scheduled_time
+        ORDER BY scheduled_time DESC
+        LIMIT 7;
+        """)
+        scheduled_times = cursor.fetchall()
+
+        recent_orders = []
+
+        for row in scheduled_times:
+            scheduled_time_utc = row['scheduled_time']
+            # Convert scheduled_time from UTC to GMT+7
+            scheduled_time_gmt7 = scheduled_time_utc.astimezone(gmt7)
+            scheduled_time_str = scheduled_time_gmt7.strftime('%d/%m/%Y %H:%M')
+
+            # Get the number of orders and their statuses for this scheduled_time
+            cursor.execute("""
+            SELECT status, COUNT(*) as count
+            FROM orders
+            WHERE scheduled_time = %s
+            GROUP BY status;
+            """, (scheduled_time_utc,))
+
+            status_counts = cursor.fetchall()
+
+            # Prepare status summary
+            status_summary = {}
+            total_orders = 0
+            for status_row in status_counts:
+                status = status_row['status']
+                count = status_row['count']
+                status_summary[status] = count
+                total_orders += count
+
+            # Determine overall status
+            if status_summary.get('pending'):
+                overall_status = f"{total_orders} orders pending fulfill"
+            elif status_summary.get('fulfilled'):
+                overall_status = f"{total_orders} orders fulfilled successful"
+            elif status_summary.get('failed'):
+                overall_status = f"{total_orders} orders failed to fulfill"
+            else:
+                overall_status = f"{total_orders} orders with mixed statuses"
+
+            recent_orders.append({
+                'scheduled_time_str': scheduled_time_str,
+                'overall_status': overall_status
+            })
+
+        cursor.close()
+        conn.close()
+
+        return recent_orders
+
+    except Exception as e:
+        app_logger.error(f"Error fetching recent scheduled orders: {str(e)}")
+        return []
+
+# Fetch recent scheduled orders for the sidebar
+recent_scheduled_orders = get_recent_scheduled_orders()
+
+# Sidebar content
+st.sidebar.title("Scheduled Fulfillments")
+if recent_scheduled_orders:
+    for order_info in recent_scheduled_orders:
+        st.sidebar.markdown(f"**{order_info['scheduled_time_str']}** - {order_info['overall_status']}")
+else:
+    st.sidebar.write("No scheduled fulfillments found.")
 
 # Display current time in GMT+7 for user reference
 current_time_gmt7 = datetime.now(gmt7)
